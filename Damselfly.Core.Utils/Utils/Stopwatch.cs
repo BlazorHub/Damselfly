@@ -11,18 +11,40 @@ namespace Damselfly.Core.Utils
     /// for each named operation, and the average times for all instances of a named
     /// operation.
     /// </summary>
-    public class Stopwatch
+    public struct Stopwatch
     {
-        private class Totals
+        private struct Totals
         {
             public long count;
             public long totalTime;
             public long maxTime;
+            public string name;
 
             public long AverageTime { get { return (long)(((double)totalTime) / count);  } }
         }
 
         private static IDictionary<string, Totals> stats = new ConcurrentDictionary<string, Totals>(StringComparer.OrdinalIgnoreCase);
+
+        private void UpdateStats( string statName, long time )
+        {
+            lock (stats)
+            {
+                Totals total;
+                if (!stats.TryGetValue(statName, out total))
+                {
+                    total = new Totals { count = 1, totalTime = time, maxTime = time, name = statName };
+                }
+                else
+                {
+                    total.count++;
+                    total.totalTime += time;
+                    if (total.maxTime < time)
+                        total.maxTime = time;
+                }
+
+                stats[timername] = total;
+            }
+        }
 
         private int taskThresholdMS = -1;
         private string timername;
@@ -40,7 +62,7 @@ namespace Damselfly.Core.Utils
             this.taskThresholdMS = thresholdMS;
 
             timername = name;
-            start = Environment.TickCount;
+            end = start = Environment.TickCount64;
         }
 
         /// <summary>
@@ -49,7 +71,7 @@ namespace Damselfly.Core.Utils
         /// </summary>
         public void Stop()
         {
-            end = Environment.TickCount;
+            end = Environment.TickCount64;
 
             long time = end - start;
             Logging.LogTrace("Time taken for {0}: {1}ms", timername, time);
@@ -59,19 +81,7 @@ namespace Damselfly.Core.Utils
                 Logging.LogVerbose($"Stopwatch: task {timername} took {time}ms (threshold {taskThresholdMS}ms).");
             }
 
-            Totals total;
-            if (!stats.TryGetValue(timername, out total))
-            {
-                total = new Totals { count = 1, totalTime = time, maxTime = time };
-                stats[timername] = total;
-            }
-            else
-            {
-                total.count++;
-                total.totalTime += time;
-                if (total.maxTime < time)
-                    total.maxTime = time;
-            }
+            UpdateStats(timername, time);
         }
 
         public long ElapsedTime { get { return end - start; } }

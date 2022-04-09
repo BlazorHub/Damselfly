@@ -114,6 +114,8 @@ namespace Damselfly.Web
                 ThumbnailService.SetThumbnailRoot(o.ThumbPath);
                 ThumbnailService.EnableThumbnailGeneration = !o.NoGenerateThumbnails;
 
+                var tieredPGO = System.Environment.GetEnvironmentVariable("DOTNET_TieredPGO") == "1";
+
                 Logging.Log("Startup State:");
                 Logging.Log($" Damselfly Ver: {Assembly.GetExecutingAssembly().GetName().Version}");
                 Logging.Log($" CLR Ver: {Environment.Version}");
@@ -125,6 +127,7 @@ namespace Damselfly.Web
                 Logging.Log($" Indexing = {!o.NoEnableIndexing}");
                 Logging.Log($" ThumbGen = {!o.NoGenerateThumbnails}");
                 Logging.Log($" Images Root set as {o.SourceDirectory}");
+                Logging.Log($" TieredPGO Enabled={tieredPGO}");
 
                 IDataBase dbType = null;
 
@@ -176,11 +179,13 @@ namespace Damselfly.Web
         {
             try
             {
-                Logging.Log("Starting Damselfly Webserver");
+                Logging.Log("Initialising Damselfly...");
 
-                BuildWebHost(listeningPort, args).Run();
+                var host = BuildHost(listeningPort, args);
 
-                Logging.Log("Damselfly Webserver stopped. Exiting");
+                host.Run();
+
+                Logging.LogWarning("Damselfly Webserver stopped. Exiting");
             }
             catch ( Exception ex )
             {
@@ -196,24 +201,29 @@ namespace Damselfly.Web
         /// <param name="port"></param>
         /// <param name="args"></param>
         /// <returns></returns>
-        public static IWebHost BuildWebHost(int port, string[] args)
+        public static IHost BuildHost(int port, string[] args)
         {
             if( port == 0 )
                 port = s_defaultPort;
 
+            return Host.CreateDefaultBuilder(args)
+                .ConfigureWebHostDefaults(webBuilder => BuildWebHost(webBuilder, port, args))
+                .UseSerilog()
+                .Build();
+        }
+
+        private static void BuildWebHost(IWebHostBuilder webBuilder, int port, string[] args)
+        {
             string url = $"http://*:{port}";
 
-            return WebHost.CreateDefaultBuilder(args)
-                .UseConfiguration(new ConfigurationBuilder()
-                    .AddCommandLine(args)
-                    .Build())
+            webBuilder.UseConfiguration(new ConfigurationBuilder()
+                .AddCommandLine(args)
+                .Build())
 #if DEBUG
-                .UseSetting(WebHostDefaults.DetailedErrorsKey, "true")
+                    .UseSetting(WebHostDefaults.DetailedErrorsKey, "true")
 #endif
-                .UseStartup<Startup>()
-                .UseSerilog()
-                .UseUrls( url )
-                .Build();
+                    .UseStartup<Startup>()
+                .UseUrls(url);
         }
     }
 }

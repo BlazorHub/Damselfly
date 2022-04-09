@@ -1,19 +1,21 @@
 ﻿using System;
-using Emgu.CV;
 using System.Drawing;
 using System.Runtime.InteropServices;
-using Emgu.CV.CvEnum;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Collections.Generic;
 using Humanizer;
 using Damselfly.Core.Utils;
-using System.Collections.Generic;
 using Damselfly.Core.Utils.ML;
-using System.Reflection;
+using Damselfly.Core.Interfaces;
+using Emgu.CV;
+using Emgu.CV.CvEnum;
+using Emgu.CV.ImgHash;
 
 namespace Damselfly.ML.Face.Emgu
 {
-    public class EmguFaceService
+    public class EmguFaceService : IHashProvider
     {
         private class ClassifierModel
         {
@@ -36,38 +38,40 @@ namespace Damselfly.ML.Face.Emgu
         {
             InitialiseClassifiers();
         }
+        
 
-       
+        /// <summary>
+        /// Created a perceptual hash for an image
+        /// </summary>
+        /// <param name="path"></param>
+        /// <returns>Binary string of the hash</returns>
+        public string GetPerceptualHash( string path )
+        {
+            using var img = CvInvoke.Imread(path);
+            var hashAlgorithm = new MarrHildrethHash();
+            var hash = new Mat();
+            hashAlgorithm.Compute(img, hash);
+
+            // Get the data from the unmanage memeory
+            var data = new byte[hash.Width * hash.Height];
+            Marshal.Copy(hash.DataPointer, data, 0, hash.Width * hash.Height);
+
+            // Concatenate the Hex values representation
+            string hexString = BitConverter.ToString(data);
+
+            Logging.LogVerbose($"EMGU created a hash: {hexString}");
+
+            return hexString.Replace( "-", "");
+        }
 
         private bool IsSupported
         {
             get
             {
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                {
-                    var asm = Assembly.GetAssembly(typeof(CascadeClassifier));
-
-                    if (asm != null)
-                    {
-                        var ver = asm.GetName().Version;
-                        if (ver != null)
-                        {
-                            var reqVer = new Version(4, 5, 3, 0);
-
-                            if (ver < reqVer)
-                            {
-                                // No MacOS love for EMGU until this bug is fixed in 4.5.3
-                                // https://github.com/emgucv/emgucv/issues/550
-                                Logging.Log("EMGU not available on OSX.");
-                                return false;
-                            }
-                        }
-                    }
-                }
-
                 return true;
             }
         }
+
         private void InitialiseClassifiers()
         {
             if (! IsSupported)
@@ -108,13 +112,26 @@ namespace Damselfly.ML.Face.Emgu
 
             try
             {
-                foreach( var model in classifiers )
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
                 {
-                    //var img = bitmap.ToMat();
-                    using var img = CvInvoke.Imread(path);
-                    using var imgGray = new UMat();
-                    CvInvoke.CvtColor(img, imgGray, ColorConversion.Bgr2Gray);
+                    // Comment from EMGUCV:
+                    // Mac OS’s security policy has been changing quite a bit in the last few OS releases, it
+                    // may have blocked access to the temporary directory that Open CV used to cache OpenCL kernels.
+                    // You can probably call “CvInvoke.UseOpenCL = false” to disable OpenCL if the running platform
+                    // is MacOS.It will disable Open CL and no kernels will be cached on disk.Not an ideal solution,
+                    // but unless Open CV address this on future release(or Apple stop changing security policies that
+                    // often) this will be a problem for Mac.
+                    CvInvoke.UseOpenCL = false;
+                }
 
+                //var img = bitmap.ToMat();
+                using var img = CvInvoke.Imread(path);
+                using var imgGray = new UMat();
+                CvInvoke.CvtColor(img, imgGray, ColorConversion.Bgr2Gray);
+                CvInvoke.EqualizeHist(imgGray, imgGray);
+
+                foreach ( var model in classifiers )
+                {
                     var faces = model.Classifier.DetectMultiScale(imgGray, 1.1, 10, new Size(20, 20), Size.Empty).ToList();
 
                     if ( faces.Any() )
@@ -127,10 +144,10 @@ namespace Damselfly.ML.Face.Emgu
                             Service = "Emgu",
                             ServiceModel = model.ClassifierFile
                         }));
-
-                        DetectDupeRects( ref result);
                     }
                 }
+
+                return DetectDupeRects( result );
             }
             catch (Exception ex)
             {
@@ -140,9 +157,9 @@ namespace Damselfly.ML.Face.Emgu
             return result;
         }
 
-        public void DetectDupeRects( ref List<ImageDetectResult> results )
+        public List<ImageDetectResult> DetectDupeRects( List<ImageDetectResult> results )
         {
-            var toDelete = new List<int>();
+            var toDelete = new HashSet<int>();
 
             for( int i = 0; i < results.Count; i++ )
             {
@@ -171,12 +188,15 @@ namespace Damselfly.ML.Face.Emgu
                 }
             }
 
-            // Now, remove the items, last-first so the collection
-            // indexes don't change. 
-            foreach( var del in toDelete.OrderByDescending( x => x ) )
+            var newResults = new List<ImageDetectResult>();
+
+            for( int i = 0; i < results.Count; i++ )
             {
-                results.RemoveAt( del ); 
+                if (!toDelete.Contains(i))
+                    newResults.Add( results[i] );
             }
+
+            return newResults;
         }
     }
 }

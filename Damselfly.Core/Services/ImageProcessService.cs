@@ -1,98 +1,117 @@
 ﻿using System.IO;
-using System.Linq;
 using System.Collections.Generic;
-using Damselfly.Core.ImageProcessing;
 using Damselfly.Core.Interfaces;
 using System.Threading.Tasks;
-using Damselfly.Core.Models;
 using Damselfly.Core.Utils;
-using System;
+using Damselfly.Core.Utils.Images;
 
-namespace Damselfly.Core.Services
+namespace Damselfly.Core.Services;
+
+/// <summary>
+/// Abstraction over the different image processing libraries.
+/// In testing, SkiaSharp was shown to be significantly faster
+/// then ImageSharp:
+///   SkiaSharp: average 100 image thumbnails processed in 50s
+///   ImageSharp: average 100 image thumnbails processed in 110s
+///   GraphicsMagick: average 100 image thumnbails processed in 100s
+/// However, since ImageSharp is entirely .Net native, whereas
+/// SkiaSharp requires C++ binaries, we'll provide both for
+/// compatibility (slower performance is better than none...).
+/// </summary>
+public class ImageProcessService : IImageProcessor, IHashProvider
 {
-    /// <summary>
-    /// Abstraction over the different image processing libraries.
-    /// In testing, SkiaSharp was shown to be significantly faster
-    /// then ImageSharp:
-    ///   SkiaSharp: average 100 image thumbnails processed in 50s
-    ///   ImageSharp: average 100 image thumnbails processed in 110s
-    ///   GraphicsMagick: average 100 image thumnbails processed in 100s
-    /// However, since ImageSharp is entirely .Net native, whereas
-    /// SkiaSharp requires C++ binaries, we'll provide both for
-    /// compatibility (slower performance is better than none...).
-    /// </summary>
-    public class ImageProcessService : IImageProcessor
+    private readonly IImageProcessorFactory _factory;
+
+    public ImageProcessService( IImageProcessorFactory factory )
     {
-        private readonly ImageProcessorFactory _factory;
+        _factory = factory;
+    }
 
-        public ImageProcessService()
+    public void SetContentPath( string path )
+    {
+        _factory.SetContentPath(path);
+    }
+
+    public string GetPerceptualHash( string path )
+    {
+        var provider = _factory.GetHashProvider();
+
+        var watch = new Stopwatch("GenPerceptualHash");
+        var hash = provider.GetPerceptualHash(path);
+        watch.Stop();
+
+        return hash;
+    }
+
+    /// <summary>
+    /// Creates a set of thumbs for an input image
+    /// </summary>
+    /// <param name="source"></param>
+    /// <param name="destFiles"></param>
+    /// <returns></returns>
+    public async Task<ImageProcessResult> CreateThumbs(FileInfo source, IDictionary<FileInfo, ThumbConfig> destFiles)
+    {
+        var processor = _factory.GetProcessor(source.Extension);
+
+        if (processor != null)
         {
-            _factory = new ImageProcessorFactory();
+            var result = await processor.CreateThumbs(source, destFiles);
+
+            return result;
         }
 
-        public void SetContentPath( string path )
-        {
-            _factory.SetContentPath(path);
-        }
+        return new ImageProcessResult { ThumbsGenerated = false };
+    }
 
-        /// <summary>
-        /// Creates a set of thumbs for an input image
-        /// </summary>
-        /// <param name="source"></param>
-        /// <param name="destFiles"></param>
-        /// <returns></returns>
-        public async Task<ImageProcessResult> CreateThumbs(FileInfo source, IDictionary<FileInfo, ThumbConfig> destFiles)
-        {
-            var processor = _factory.GetProcessor(source.Extension);
+    /// <summary>
+    /// Convert an image, optionally watermarking.
+    /// </summary>
+    /// <param name="input"></param>
+    /// <param name="output"></param>
+    /// <param name="config"></param>
+    /// TODO: Async
+    public async Task TransformDownloadImage(string input, Stream output, IExportSettings exportConfig)
+    {
+        var ext = Path.GetExtension(input);
 
-            if( processor != null )
-                return await processor.CreateThumbs(source, destFiles);
+        var processor = _factory.GetProcessor(ext);
 
-            return new ImageProcessResult { ThumbsGenerated = false };
-        }
+        if (processor != null)
+            await processor.TransformDownloadImage(input, output, exportConfig);
+    }
 
-        /// <summary>
-        /// Convert an image, optionally watermarking.
-        /// </summary>
-        /// <param name="input"></param>
-        /// <param name="output"></param>
-        /// <param name="config"></param>
-        /// TODO: Async
-        public void TransformDownloadImage(string input, Stream output, ExportConfig config)
-        {
-            var ext = Path.GetExtension(input);
+    /// <summary>
+    /// Returns true if the file is one that we consider to be an image - that is,
+    /// one that we have an image processor for, which will generate thumbs, etc.
+    /// </summary>
+    /// <param name="filename"></param>
+    /// <returns></returns>
+    public bool IsImageFileType(FileInfo filename)
+    {
+        if (filename.IsHidden())
+            return false;
 
-            var processor = _factory.GetProcessor(ext);
+        var processor = _factory.GetProcessor(filename.Extension);
 
-            if (processor != null)
-                processor.TransformDownloadImage(input, output, config);
-        }
+        // If we have a valid processor, we're good. 
+        return processor != null;
+    }
 
-        /// <summary>
-        /// Returns true if the file is one that we consider to be an image - that is,
-        /// one that we have an image processor for, which will generate thumbs, etc.
-        /// </summary>
-        /// <param name="filename"></param>
-        /// <returns></returns>
-        public bool IsImageFileType(FileInfo filename)
-        {
-            if (filename.IsHidden())
-                return false;
+    public async Task GetCroppedFile(FileInfo source, int x, int y, int width, int height, FileInfo destFile)
+    {
+        var ext = Path.GetExtension(source.Name);
 
-            var processor = _factory.GetProcessor(filename.Extension);
+        var processor = _factory.GetProcessor(ext);
 
-            // If we have a valid processor, we're good. 
-            return processor != null;
-        }
+        if (processor != null)
+            await processor.GetCroppedFile(source, x, y, width, height, destFile);
+    }
 
-        public async Task GetCroppedFile(FileInfo source, int x, int y, int width, int height, FileInfo destFile)
-        {
-            var ext = Path.GetExtension(source.Name);
+    public async Task CropImage(FileInfo path, int x, int y, int width, int height, Stream stream)
+    {
+        var processor = _factory.GetProcessor(path.Extension);
 
-            var processor = _factory.GetProcessor(ext);
-
-            if (processor != null)
-                await processor.GetCroppedFile(source, x, y, width, height, destFile);
-        }
+        if (processor != null)
+            await processor.CropImage(path, x, y, width, height, stream);
     }
 }

@@ -6,9 +6,10 @@ using Microsoft.EntityFrameworkCore;
 using Damselfly.Core.Models;
 using Damselfly.Core.DbModels.Interfaces;
 using Damselfly.Core.DbModels.DBAbstractions;
+using System.Linq.Expressions;
 using Damselfly.Core.Utils;
-using Z.EntityFramework.Plus;
 using SqlParameter = Microsoft.Data.Sqlite.SqliteParameter;
+using EFCore.BulkExtensions;
 
 namespace Damselfly.Migrations.Sqlite.Models
 {
@@ -90,6 +91,10 @@ namespace Damselfly.Migrations.Sqlite.Models
             // Store temporary tables in memory
             ExecutePragma(db, "PRAGMA temp_store=MEMORY;");
 
+            // Massive hack....
+            Logging.LogTrace("Deleting corrupt ImageMetaData entries");
+            db.Database.ExecuteSqlRaw("delete from imagemetadata where Lastupdated = 1998;");
+
             Logging.Log("Running Sqlite DB optimisation...");
             db.Database.ExecuteSqlRaw("VACUUM;");
             Logging.Log("DB optimisation complete.");
@@ -116,7 +121,12 @@ namespace Damselfly.Migrations.Sqlite.Models
             }
             catch( Exception ex )
             {
-                Logging.LogWarning($"Migrations failed - creating DB. Exception: {ex}");
+                Logging.LogWarning($"Migrations failed with exception: {ex}");
+
+                if( ex.InnerException != null )
+                    Logging.LogWarning($"InnerException: {ex.InnerException}");
+
+                Logging.Log($"Creating DB.");
                 db.Database.EnsureCreated();
             }
 
@@ -142,8 +152,9 @@ namespace Damselfly.Migrations.Sqlite.Models
             bool success = false;
             try
             {
-                collection.AddRange(itemsToSave);
-                await db.SaveChangesAsync();
+                var bulkConfig = new BulkConfig { SetOutputIdentity = true, BatchSize = 500 };
+
+                await db.BulkInsertAsync(itemsToSave, bulkConfig);
 
                 success = true;
             }
@@ -175,8 +186,10 @@ namespace Damselfly.Migrations.Sqlite.Models
             bool success = false;
             try
             {
-                collection.UpdateRange(itemsToSave);
-                await db.SaveChangesAsync();
+                //collection.UpdateRange(itemsToSave);
+                //await db.SaveChangesAsync();
+
+                await db.BulkUpdateAsync(itemsToSave);
 
                 success = true;
             }
@@ -207,8 +220,11 @@ namespace Damselfly.Migrations.Sqlite.Models
             bool success = false;
             try
             {
-                collection.RemoveRange(itemsToDelete);
-                await db.SaveChangesAsync();
+                //collection.RemoveRange(itemsToDelete);
+                //await db.SaveChangesAsync();
+
+                await db.BulkDeleteAsync(itemsToDelete);
+
                 success = true;
             }
             catch (Exception ex)
@@ -235,8 +251,14 @@ namespace Damselfly.Migrations.Sqlite.Models
 
         public async Task<int> BatchDelete<T>(IQueryable<T> query) where T : class
         {
-            // TODO Use bulk delete here?
-            return await query.DeleteAsync();
+            // TODO Try/Catch here?
+            return await query.BatchDeleteAsync();
+        }
+
+        public async Task<int> BatchUpdate<T>(IQueryable<T> query, Expression<Func<T,T>> updateExpression) where T : class
+        {
+            // TODO Try/Catch here?
+            return await query.BatchUpdateAsync( updateExpression );
         }
 
         private string Sanitize( string input )

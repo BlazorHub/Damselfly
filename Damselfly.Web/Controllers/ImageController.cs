@@ -3,15 +3,13 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Damselfly.Core.ImageProcessing;
-using Damselfly.Core.Services;
-using Damselfly.Web.Data;
-using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics.CodeAnalysis;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Damselfly.Core.Services;
 using Damselfly.Core.Models;
 using Damselfly.Core.Utils;
-using Damselfly.Core.ScopedServices;
-using Microsoft.EntityFrameworkCore;
+using Damselfly.Core.Utils.Images;
 
 namespace Damselfly.Web.Controllers
 {
@@ -112,36 +110,9 @@ namespace Damselfly.Web.Controllers
                             {
                                 gotThumb = true;
 
-                                Logging.LogTrace($" - Updating metadata for {imageId}");
-                                try
-                                {
-                                    using var db = new ImageContext();
-
-                                    if (image.MetaData != null)
-                                    {
-                                        db.Attach(image.MetaData);
-                                        image.MetaData.Hash = conversionResult.ImageHash;
-                                        image.MetaData.ThumbLastUpdated = DateTime.UtcNow;
-                                        db.ImageMetaData.Update(image.MetaData);
-                                    }
-                                    else
-                                    {
-                                        var metadata = new ImageMetaData
-                                        {
-                                            ImageId = image.ImageId,
-                                            Hash = conversionResult.ImageHash,
-                                            ThumbLastUpdated = DateTime.UtcNow
-                                        };
-                                        db.ImageMetaData.Add(metadata);
-                                        image.MetaData = metadata;
-                                    }
-
-                                    await db.SaveChangesAsync("ThumbUpdate");
-                                }
-                                catch (Exception ex)
-                                {
-                                    Logging.LogWarning($"Unable to update DB thumb for ID {imageId}: {ex.Message}");
-                                }
+                                // TODO: Do we do this here? If we don't gen all the thumbs, it'll end up
+                                // with stuff like AI not working later.
+                                // await UpdateThumbStatus( image, conversionResult );
                             }
                         }
 
@@ -160,7 +131,7 @@ namespace Damselfly.Web.Controllers
                 }
                 catch (Exception ex)
                 {
-                    Logging.LogError($"Unable to process /thumb/{thumbSize}/{imageId}: ", ex.Message);
+                    Logging.LogError($"Unable to process /thumb/{thumbSize}/{imageId}: {ex.Message}");
                 }
             }
 
@@ -169,47 +140,89 @@ namespace Damselfly.Web.Controllers
             return result;
         }
 
+        private async Task UpdateThumbStatus(Image image, ImageProcessResult conversionResult)
+        {
+            Logging.LogTrace($" - Updating metadata for {image.ImageId}");
+            try
+            {
+                using var db = new ImageContext();
+
+                if (image.MetaData != null)
+                {
+                    db.Attach(image.MetaData);
+                    image.MetaData.ThumbLastUpdated = DateTime.UtcNow;
+                    db.ImageMetaData.Update(image.MetaData);
+                }
+                else
+                {
+                    var metadata = new ImageMetaData
+                    {
+                        ImageId = image.ImageId,
+                        ThumbLastUpdated = DateTime.UtcNow
+                    };
+                    db.ImageMetaData.Add(metadata);
+                    image.MetaData = metadata;
+                }
+
+                await db.SaveChangesAsync("ThumbUpdate");
+            }
+            catch (Exception ex)
+            {
+                Logging.LogWarning($"Unable to update DB thumb for ID {image.ImageId}: {ex.Message}");
+            }
+        }
+
         [HttpGet("/face/{faceId}")]
         public async Task<IActionResult> Face(string faceId, CancellationToken cancel,
-                [FromServices] ImageProcessService imageProcessor, [FromServices] ThumbnailService thumbService)
+                [FromServices] ImageProcessService imageProcessor,
+                [FromServices] ThumbnailService thumbService,
+                [FromServices] ImageCache imageCache)
         {
             using var db = new ImageContext();
 
             IActionResult result = Redirect("/no-image.png");
 
-            // TODO: Use cache
-
-            var query = db.ImageObjects
-                .Include(x => x.Image)
-                .ThenInclude(o => o.MetaData)
-                .Include(x => x.Person)
-                .OrderByDescending(x => x.Image.MetaData.Width)
-                .ThenByDescending(x => x.Image.MetaData.Height);
-
-            ImageObject face = null;
-
-            if ( int.TryParse( faceId, out var personId ))
+            try
             {
-                face = await query.Where( x => x.Person.PersonId == personId )
-                         .FirstOrDefaultAsync();
+                var query = db.ImageObjects.AsQueryable();
+
+                // TODO Massively optimise this - if the file already exists we don't need the DB
+                if (int.TryParse(faceId, out var personId))
+                {
+                    query = query.Where(x => x.Person.PersonId == personId);
+                }
+                else
+                {
+                    query = query.Where(x => x.Person.AzurePersonId == faceId);
+                }
+
+                // Sort by largest face picture, then by most recent date taken
+                var face = await query
+                                .OrderByDescending(x => x.RectWidth)
+                                .ThenByDescending(x => x.RectHeight)
+                                .ThenByDescending(x => x.Image.SortDate)
+                                .FirstOrDefaultAsync();
+
+                if (cancel.IsCancellationRequested)
+                    return result;
+
+                if (face != null)
+                {
+                    var thumbPath = await thumbService.GenerateFaceThumb(face);
+
+                    if (thumbPath != null && thumbPath.Exists)
+                    {
+                        result = PhysicalFile(thumbPath.FullName, "image/jpeg");
+                    }
+                }
             }
-            else
+            catch( Exception ex )
             {
-                face = await query.Where(x => x.Person.AzurePersonId == faceId)
-                         .FirstOrDefaultAsync();
-            }
-
-            var file = new FileInfo(face.Image.FullPath);
-            var imagePath = new FileInfo( thumbService.GetThumbPath(file, ThumbSize.Large) );
-            var destFile = new FileInfo( "path" );
-
-            if (!destFile.Exists)
-            {
-                await imageProcessor.GetCroppedFile(imagePath, face.RectX, face.RectY, face.RectWidth, face.RectHeight, destFile );
+                Logging.LogError($"Unable to load face thumbnail for {faceId}: {ex.Message}");
             }
 
             return result;
         }
-
+       
     }
 }

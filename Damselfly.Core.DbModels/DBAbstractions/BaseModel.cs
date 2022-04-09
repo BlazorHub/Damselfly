@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Damselfly.Core.DbModels.Interfaces;
@@ -57,6 +58,10 @@ namespace Damselfly.Core.DbModels.DBAbstractions
             if (lazyLoad)
                 options.UseLazyLoadingProxies();
 
+            // Default to no tracking for performance. We can use Attach or 
+            // AsTracking explicitly for when we need to do write operations.
+            options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTrackingWithIdentityResolution);
+
             // See efmigrations.md
             //var obj = Activator.CreateInstance("Damselfly.Migrations.Sqlite", "Damselfly.Migrations.Sqlite.Models.SqlLiteModel");
             //var obj = Activator.CreateInstance("Damselfly.Migrations.Postgres", "Damselfly.Migrations.Postgres.Models.PostgresModel");
@@ -77,7 +82,7 @@ namespace Damselfly.Core.DbModels.DBAbstractions
             if (ReadOnly)
                 return true;
 
-            return await Task.Run(() => DatabaseSpecialisation.BulkInsert(this, collection, itemsToSave));
+            return await DatabaseSpecialisation.BulkInsert(this, collection, itemsToSave);
         }
 
         /// <summary>
@@ -93,7 +98,7 @@ namespace Damselfly.Core.DbModels.DBAbstractions
             if (ReadOnly)
                 return true;
 
-            return await Task.Run(() => DatabaseSpecialisation.BulkUpdate(this, collection, itemsToSave));
+            return await DatabaseSpecialisation.BulkUpdate(this, collection, itemsToSave);
         }
 
         /// <summary>
@@ -109,7 +114,15 @@ namespace Damselfly.Core.DbModels.DBAbstractions
             if (ReadOnly)
                 return true;
 
-            return await Task.Run( () => DatabaseSpecialisation.BulkDelete(this, collection, itemsToDelete) );
+            try
+            {
+                return await DatabaseSpecialisation.BulkDelete(this, collection, itemsToDelete);
+            }
+            catch( Exception ex )
+            {
+                Logging.LogError($"Exception during batch delete: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -123,8 +136,39 @@ namespace Damselfly.Core.DbModels.DBAbstractions
             if (ReadOnly)
                 return 1;
 
-            return await Task.Run(() => DatabaseSpecialisation.BatchDelete(query));
+            try
+            {
+                return await DatabaseSpecialisation.BatchDelete(query);
+            }
+            catch(Exception ex )
+            {
+                Logging.LogError($"Exception during batch delete: {ex.Message}");
+                return 0;
+            }
         }
+
+        /// <summary>
+        /// Wrapper to extract the underlying BatchDelete implementation depending on the
+        /// DB model being used.
+        /// </summary>
+        /// <param name="query"></param>
+        /// <returns></returns>
+        public async Task<int> BatchUpdate<T>(IQueryable<T> query, Expression<Func<T, T>> updateExpression) where T : class
+        {
+            if (ReadOnly)
+                return 1;
+
+            try
+            { 
+                return await DatabaseSpecialisation.BatchUpdate(query, updateExpression);
+            }
+            catch( Exception ex )
+            {
+                Logging.LogError($"Exception during batch update: {ex.Message}");
+                return 0;
+            }
+        }
+
 
         /// <summary>
         /// Bulk insert weapper for the database specialisation type. 
@@ -288,6 +332,8 @@ namespace Damselfly.Core.DbModels.DBAbstractions
                         if (ex.InnerException != null)
                             Logging.LogError("  Exception - DB WRITE FAILED. InnerException: {0}", ex.InnerException.Message);
 
+                        // No retries if it's not a locked DB
+                        break;
                     }
                 }
 

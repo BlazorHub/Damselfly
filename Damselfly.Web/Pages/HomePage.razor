@@ -3,13 +3,13 @@
 @using Damselfly.Web.Data
 @using Damselfly.Core.Services;
 @using Damselfly.Web.Shared.Images;
-@using Damselfly.Core.ImageProcessing;
+@using Damselfly.Core.Utils.Images
 
 @implements IDisposable
 
 @inject ThumbnailService thumbService
 @inject ViewDataService ViewDataService
-@inject IndexingService indexingService
+@inject MetaDataService metadataService
 @inject NavigationService navContext
 @inject SearchService searchService
 @inject UserStatusService statusService
@@ -73,24 +73,32 @@
             }
         }
 
+        if (PersonId != 0)
+        {
+            using var db = new ImageContext();
+
+            var person = await db.People.FindAsync(PersonId);
+
+            if (person != null)
+            {
+                statusService.StatusText = $"Selected person {person.Name}";
+                searchService.Person = person;
+            }
+        }
+
         if (TagId != 0)
         {
-            var tag = indexingService.GetTag(TagId);
+            var tag = metadataService.GetTag(TagId);
 
             if (tag != null)
                 searchService.Tag = tag;
         }
         else if( ! string.IsNullOrEmpty( Tag ))
         {
-            var tag = indexingService.GetTag(Tag);
+            var tag = metadataService.GetTag(Tag);
 
             if (tag != null)
                 searchService.Tag = tag;
-        }
-
-        if (Date != DateTime.MinValue)
-        {
-            // searchService.MinDate
         }
 
         // Don't need this yet

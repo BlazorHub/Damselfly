@@ -17,7 +17,7 @@ editing etc.
 
 ## Features
 
-* Support for most image formats including JPG, PNG, HEIC, TIFF, Webp, BMP and DNG/CR2 (RAW) files.
+* Support for most image formats including JPG, PNG, HEIC, TIFF, Webp, BMP and DNG/CR2/ORF (RAW) files.
 * AI / Computer vision image recognition:
     * Facial detection
     * Object detection and recognition
@@ -25,6 +25,7 @@ editing etc.
     * Facial Recognition (requires a [free Azure Face Services account](https://azure.microsoft.com/free/cognitive-services/))
 * Full-text search with multi-phrase partial-word searches
 * Advanced search - filter by:
+  * Find visually similar images
   * Date ranges
   * Objects/Faces/Identified faces
   * Camera/Lens Make/Model
@@ -80,6 +81,8 @@ You can follow Damselfly on [Twitter](https://twitter.com/damselflyphotos) or as
 <br/>
 <img style="margin: 5px;" src="docs/Damselfly-imageview.jpg" alt="Viewing images in Damselfly" width="600"/>
 <img style="margin: 5px;" src="docs/Damselfly-AI.jpg" alt="Face and Object Detection in Damselfly" width="600"/>
+<br/>
+<img style="margin: 5px;" src="docs/Damselfly-grouping.jpg" alt="Browsing images grouped by date Damselfly" width="600"/>
 <div>
 
 ## Planned Features/Enhancements
@@ -103,7 +106,7 @@ do this for you) where the server will re-index them to pick up your changes.
 ### Suggested workflow.
 
 1. Images are copied onto a laptop for initial sorting, quality checks, and IPTC tagging using Picasa or Digikam
-2. [Rclone](www.rclone.org) script syncs the new images across the LAN to the network share
+2. [Rclone](https://rclone.org/) script syncs the new images across the LAN to the network share
 3. Damselfly automatically picks up the new images and indexes them (and generates thumbnails) within 30 minutes
 4. Images are now searchable in Damselfly and can be added to the Damselfly 'basket' with a single click
 5. Images in the basket can be copied back to the desktop/laptop for local editing in Lightroom/On1/Digikam/etc.

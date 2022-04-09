@@ -1,13 +1,13 @@
 ﻿
 @inject SearchService searchService
 @inject ImageRecognitionService aiService
-@inject UserStatusService statusService;
+@inject UserStatusService statusService
 
 <div class="object" title="@ObjectName" style="@ObjectStylePos" id="@theObject.PersonId">
     @if (Editing)
     {
     <div class="object-editor">
-        <BlazoredTypeahead class="InputAddOn-field" SearchMethod="SearchNames" EnableDropDown="false"
+        <BlazoredTypeahead SearchMethod="SearchNames" EnableDropDown="false"
                            placeholder="Enter a Name" Debounce="100" 
                            @bind-Value="@TypeAheadName" @onblur="@LostFocus">
             <SelectedTemplate>
@@ -114,7 +114,6 @@
 
             await aiService.UpdateName(theObject, name);
 
-            // TODO: Update the cache
             statusService.StatusText = $"Name saved as '{name}'";
 
             // Reset the tag

@@ -15,7 +15,7 @@ namespace Damselfly.Core.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "6.0.0-rc.1.21452.10");
+            modelBuilder.HasAnnotation("ProductVersion", "6.0.2");
 
             modelBuilder.Entity("Damselfly.Core.DbModels.AppIdentityUser", b =>
                 {
@@ -117,21 +117,21 @@ namespace Damselfly.Core.Migrations
                         new
                         {
                             Id = 1,
-                            ConcurrencyStamp = "ddf4d227-28f9-43af-a72d-6f7778ea87a7",
+                            ConcurrencyStamp = "b25e7079-5db1-40d8-82c1-58cd0ec155ca",
                             Name = "User",
                             NormalizedName = "USER"
                         },
                         new
                         {
                             Id = 2,
-                            ConcurrencyStamp = "33b555f9-1e38-4250-bdac-1d56fce31a78",
+                            ConcurrencyStamp = "cd16a8fe-045c-4a16-ad18-0350aa6e0070",
                             Name = "Admin",
                             NormalizedName = "ADMIN"
                         },
                         new
                         {
                             Id = 3,
-                            ConcurrencyStamp = "a0007d57-b34b-46c3-90f5-d4db384b2259",
+                            ConcurrencyStamp = "209ccba0-909f-4775-a806-335aa85678a4",
                             Name = "ReadOnly",
                             NormalizedName = "READONLY"
                         });
@@ -371,6 +371,42 @@ namespace Damselfly.Core.Migrations
                     b.ToTable("FTSTags");
                 });
 
+            modelBuilder.Entity("Damselfly.Core.Models.Hash", b =>
+                {
+                    b.Property<int>("HashId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ImageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MD5ImageHash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PerceptualHex1")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PerceptualHex2")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PerceptualHex3")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PerceptualHex4")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("HashId");
+
+                    b.HasIndex("ImageId")
+                        .IsUnique();
+
+                    b.HasIndex("MD5ImageHash");
+
+                    b.HasIndex("PerceptualHex1", "PerceptualHex2", "PerceptualHex3", "PerceptualHex4");
+
+                    b.ToTable("Hashes");
+                });
+
             modelBuilder.Entity("Damselfly.Core.Models.Image", b =>
                 {
                     b.Property<int>("ImageId")
@@ -447,6 +483,9 @@ namespace Damselfly.Core.Migrations
                     b.Property<DateTime?>("AILastUpdated")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AverageColor")
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("CameraId")
                         .HasColumnType("INTEGER");
 
@@ -465,6 +504,9 @@ namespace Damselfly.Core.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("DominantColor")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Exposure")
                         .HasColumnType("TEXT");
 
@@ -473,9 +515,6 @@ namespace Damselfly.Core.Migrations
 
                     b.Property<bool>("FlashFired")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("Hash")
-                        .HasColumnType("TEXT");
 
                     b.Property<int>("Height")
                         .HasColumnType("INTEGER");
@@ -489,8 +528,14 @@ namespace Damselfly.Core.Migrations
                     b.Property<DateTime>("LastUpdated")
                         .HasColumnType("TEXT");
 
+                    b.Property<double?>("Latitude")
+                        .HasColumnType("REAL");
+
                     b.Property<int?>("LensId")
                         .HasColumnType("INTEGER");
+
+                    b.Property<double?>("Longitude")
+                        .HasColumnType("REAL");
 
                     b.Property<int>("Rating")
                         .HasColumnType("INTEGER");
@@ -509,12 +554,12 @@ namespace Damselfly.Core.Migrations
 
                     b.HasIndex("DateTaken");
 
-                    b.HasIndex("Hash");
-
                     b.HasIndex("ImageId")
                         .IsUnique();
 
                     b.HasIndex("LensId");
+
+                    b.HasIndex("Rating");
 
                     b.HasIndex("ThumbLastUpdated");
 
@@ -841,6 +886,17 @@ namespace Damselfly.Core.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Damselfly.Core.Models.Hash", b =>
+                {
+                    b.HasOne("Damselfly.Core.Models.Image", "Image")
+                        .WithOne("Hash")
+                        .HasForeignKey("Damselfly.Core.Models.Hash", "ImageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Image");
+                });
+
             modelBuilder.Entity("Damselfly.Core.Models.Image", b =>
                 {
                     b.HasOne("Damselfly.Core.Models.Folder", "Folder")
@@ -991,6 +1047,8 @@ namespace Damselfly.Core.Migrations
                     b.Navigation("BasketEntries");
 
                     b.Navigation("Classification");
+
+                    b.Navigation("Hash");
 
                     b.Navigation("ImageObjects");
 

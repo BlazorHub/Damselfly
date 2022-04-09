@@ -148,6 +148,10 @@ namespace Damselfly.ML.Face.Azure
             }
         }
 
+        /// <summary>
+        /// Set up the service and query the state of the person directory etc
+        /// </summary>
+        /// <returns></returns>
         private async Task InitializeAzureService()
         {
             Logging.Log("Starting Azure Face Service...");
@@ -206,15 +210,13 @@ namespace Damselfly.ML.Face.Azure
         /// </summary>
         /// <param name="image"></param>
         /// <returns></returns>
-        private async Task<IList<DetectedFace>> AzureDetect( Bitmap image )
+        private async Task<IList<DetectedFace>> AzureDetect(string imagePath )
         {
-            using var memoryStream = new MemoryStream();
-            image.Save(memoryStream, System.Drawing.Imaging.ImageFormat.Jpeg);
-            memoryStream.Seek(0, SeekOrigin.Begin);
+            using var fileStream = File.OpenRead( imagePath );
 
             Logging.LogVerbose($"Calling Azure Face service...");
 
-            var detectedFaces = await _transThrottle.Call("Detect", _faceClient.Face.DetectWithStreamAsync(memoryStream, true, true, _attributes, recognitionModel: RECOGNITION_MODEL));
+            var detectedFaces = await _transThrottle.Call("Detect", _faceClient.Face.DetectWithStreamAsync(fileStream, true, true, _attributes, recognitionModel: RECOGNITION_MODEL));
 
             Logging.LogVerbose($"Azure Face service call complete.");
 
@@ -226,7 +228,7 @@ namespace Damselfly.ML.Face.Azure
         /// </summary>
         /// <param name="imageFilePath"></param>
         /// <returns></returns>
-        public async Task<List<Face>> DetectFaces( Bitmap sourceImage )
+        public async Task<List<Face>> DetectFaces( string imagePath, IImageProcessor imageProcessor )
         {
             var faces = new List<Face>();
 
@@ -242,9 +244,9 @@ namespace Damselfly.ML.Face.Azure
 
                 try
                 {
-                    var detectedFaces = await AzureDetect(sourceImage);
+                    var detectedFaces = await AzureDetect(imagePath);
 
-                    if (detectedFaces.Any())
+                    if (detectedFaces != null && detectedFaces.Any())
                     {
                         faces = await IdentifyOrCreateFaces(detectedFaces);
 
@@ -253,11 +255,19 @@ namespace Damselfly.ML.Face.Azure
                             // Hopefully they'll improve this....
                             // https://docs.microsoft.com/en-us/answers/questions/494886/azure-faceclient-persondirectory-api-usage.html
 
-                            MemoryStream memoryStream = SaveFaceThumb(sourceImage, face);
+                            using MemoryStream stream = new MemoryStream();
+                            await imageProcessor.CropImage(new FileInfo( imagePath ), face.Left, face.Top, face.Width, face.Height, stream);
 
-                            var persistedFace = await _transThrottle.Call("AddFace", _faceClient.PersonDirectory.AddPersonFaceFromStreamAsync(
-                                                    face.PersonId.ToString(), image: memoryStream, recognitionModel: RECOGNITION_MODEL,
-                                                    detectionModel: DETECTION_MODEL));
+                            if (stream != null)
+                            {
+                                var persistedFace = await _transThrottle.Call("AddFace", _faceClient.PersonDirectory.AddPersonFaceFromStreamAsync(
+                                                        face.PersonId.ToString(),
+                                                        image: stream,
+                                                        recognitionModel: RECOGNITION_MODEL,
+                                                        detectionModel: DETECTION_MODEL));
+                            }
+                            else
+                                Logging.Log($"Unable to crop image for Azure: no supported image processor for {imagePath}");
                         }
                     }
                 }
@@ -286,54 +296,6 @@ namespace Damselfly.ML.Face.Azure
         }
 
         /// <summary>
-        /// Crop the face from the original image, and save it locally.
-        /// </summary>
-        /// <param name="sourceImage"></param>
-        /// <param name="face"></param>
-        /// <returns></returns>
-        private static MemoryStream SaveFaceThumb(Bitmap sourceImage, Face face)
-        {
-            // It's a new face. Extract the face rect.
-            var faceRect = new Rectangle(face.Left, face.Top, face.Width, face.Height);
-
-            // Save the faces
-            var faceBitmap = GetCroppedFaceFromImage(sourceImage, faceRect);
-            var memoryStream = new MemoryStream();
-            faceBitmap.Save(memoryStream, System.Drawing.Imaging.ImageFormat.Jpeg);
-            memoryStream.Seek(0, SeekOrigin.Begin);
-
-            if (System.Diagnostics.Debugger.IsAttached)
-            {
-                // TODO: Probably want to write these to a 'thumbs' style folder, so we can resubmit
-                // the face training data if we need to for any reason.
-                string faceFile = $"/Users/markotway/Desktop/Faces/{face.PersonId.Value}.jpg";
-                faceBitmap.Save(faceFile);
-            }
-
-            return memoryStream;
-        }
-
-        /// <summary>
-        /// Extract the cropped area of a specific face from the source image
-        /// </summary>
-        /// <param name="sourceImage"></param>
-        /// <param name="cropRect"></param>
-        /// <returns></returns>
-        public static Bitmap GetCroppedFaceFromImage(Bitmap sourceImage, Rectangle cropRect)
-        {
-            // Inflate by 10% to ensure we capture the whole face. 
-            var inflate = new Size((int)(cropRect.Width * 0.1), (int)(cropRect.Height * 0.1));
-            cropRect.Inflate(inflate);
-
-            Bitmap nb = new Bitmap(cropRect.Width, cropRect.Height);
-            using (Graphics g = Graphics.FromImage(nb))
-            {
-                g.DrawImage(sourceImage, -cropRect.X, -cropRect.Y);
-                return nb;
-            }
-        }
-
-        /// <summary>
         /// Attempt to identify the faces from the trained set we have now.
         /// </summary>
         /// <param name="detectedFaces"></param>
@@ -354,22 +316,25 @@ namespace Damselfly.ML.Face.Azure
             if (_persistedFaces > 0 )
             {
                 var faceIdsToMatch = detectedFaces.Where(x => x.FaceId.HasValue).Select(x => x.FaceId.Value).ToList();
-                // ge":"Incompatible identification scope parameters are present in the request."}}
+
                 var matches = await _transThrottle.Call( "Identify", _faceClient.Face.IdentifyAsync(faceIdsToMatch,
                                                 personIds: new List<string> { "*" }, maxNumOfCandidatesReturned: 3) );
 
-                foreach (var match in matches)
+                if (matches != null)
                 {
-                    // Find the face for this match
-                    var face = faces.FirstOrDefault(x => x.FaceId == match.FaceId);
-
-                    if (match.Candidates?.Count > 0)
+                    foreach (var match in matches)
                     {
-                        // We got a match. Pick the first one for now.
-                        face.PersonId = match.Candidates[0].PersonId;
-                        face.Score = match.Candidates[0].Confidence;
-                        // TODO: face.score = match.Candidates[0].Confidence;
-                        Logging.Log($"Identified person {face.PersonId.Value}.");
+                        // Find the face for this match
+                        var face = faces.FirstOrDefault(x => x.FaceId == match.FaceId);
+
+                        if (match.Candidates?.Count > 0)
+                        {
+                            // We got a match. Pick the first one for now.
+                            face.PersonId = match.Candidates[0].PersonId;
+                            face.Score = match.Candidates[0].Confidence;
+                            // TODO: face.score = match.Candidates[0].Confidence;
+                            Logging.Log($"Identified person {face.PersonId.Value}.");
+                        }
                     }
                 }
             }
@@ -384,11 +349,17 @@ namespace Damselfly.ML.Face.Azure
                 // It's somebody new - create the person
                 var createdPerson = await _transThrottle.Call("CreatePerson", _faceClient.PersonDirectory.CreatePersonAsync(body));
 
-                // Keep track of this - we could call GetGroup.List, but that uses up a transaction...
-                _persistedFaces++;
+                if (createdPerson != null && createdPerson.Body != null)
+                {
+                    // Keep track of this - we could call GetGroup.List, but that uses up a transaction...
+                    _persistedFaces++;
 
-                newFace.PersonId = createdPerson.Body.PersonId;
-                Logging.Log($"Created new person {newFace.PersonId.Value}.");
+
+                    newFace.PersonId = createdPerson.Body.PersonId;
+                    Logging.Log($"Created new person {newFace.PersonId.Value}.");
+                }
+                else
+                    Logging.LogWarning($"New person was not created from Azure. Possible API limit breach.");
             }
 
             return faces;

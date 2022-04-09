@@ -11,13 +11,12 @@
     <title>Damselfly - Digital Asset Management</title>
     <base href="~/" />
     <link href="_content/Blazored.Typeahead/blazored-typeahead.css" rel="stylesheet" />
-    <link rel="stylesheet" href="_content/BlazorDateRangePicker/daterangepicker.min.css" />
     <link rel="stylesheet" href="font-awesome/css/all.min.css" />
     <link rel="stylesheet" href="Cropper/cropper.css" />
     <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700&display=swap" rel="stylesheet" />
     <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
+    <link href="_content/Syncfusion.Blazor.Themes/bootstrap4.css" rel="stylesheet" />
     <link href="_content/Radzen.Blazor/css/default.css" rel="stylesheet">
-    <link href="css/DarkDateRangePicker.css" rel="stylesheet" />
     <link href="css/snackbar.css" rel="stylesheet" />
     <link href="themes/green.css" id="themeStyleSheet" rel="stylesheet" />
     <link href="css/site.css" rel="stylesheet" />
@@ -58,6 +57,11 @@
             return element.setSelectionRange(start, end);
         }
 
+        function clearFocus() {
+            if (document.activeElement instanceof HTMLElement)
+                document.activeElement.blur();
+        }
+
         function writeFileLocally(sourceUrl, localFilename) {
             window.downloadUrl(sourceUrl, localFilename);
         }
@@ -80,10 +84,10 @@
 
     <script src="_framework/blazor.server.js"></script>
     <script src="_content/Blazored.Typeahead/blazored-typeahead.js"></script>
-    <script src="_content/BlazorDateRangePicker/clickAndPositionHandler.js"></script>
     <script src="zoom/imageZoom.js"></script>
     <script src="objectrects/objectrects.js"></script>
     <script src="vScroll/virtualScroll.js"></script>
+    <script src="vScroll/scrollMonitor.js"></script>
     <script src="Cropper/cropper.js"></script>
     <script src="Cropper/damselflyCrop.js"></script>
     <script src="_content/Radzen.Blazor/Radzen.Blazor.js"></script>

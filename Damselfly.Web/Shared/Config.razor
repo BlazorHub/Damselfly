@@ -9,11 +9,15 @@
 @inject IJSRuntime JsRuntime
 @inject ConfigService configService
 @inject UserConfigService userConfigService
+@inject UserThemeService userThemeService
 @inject ThemeService themeService
 @inject UserStatusService statusService
+@inject UserService userService
 @inject WordpressService wpService
-@inject ImageRecognitionService imageService  
+@inject ImageRecognitionService imageService
 @inject AzureFaceService azureService
+@inject WorkService workService
+@inject IDialogService DialogService
 
 <div class="damselfly-config">
     <h1>Configuration Settings</h1>
@@ -21,34 +25,44 @@
         <Authorized Context="auth">
             <MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="damselfly-configsection">
                 <MudTabPanel Text="User Settings">
-                    <h2>Settings for @auth.User.Identity.Name</h2>
-                    <EditForm Model="@wpSettings" OnValidSubmit="@HandleValidSubmit">
-                        <FluentValidationValidator />
-                        <ValidationSummary />
-
-                        <div class="damselfly-configsetting">
-                            <div class="damselfly-configfield">
-                                <MudSelect T="string" Label="Theme" HelperText="Select colour theme for the app" @bind-Value="selectedTheme" Variant="Variant.Filled">
-                                    @foreach (var choice in themeService.Themes)
-                                    {
-                                        <MudSelectItem T="string" Value="@choice">
-                                            @choice.Transform(To.SentenceCase)
-                                        </MudSelectItem>
-                                    }
-                                </MudSelect>
+                    <EditForm Model="similarityThreshold" OnValidSubmit="@HandleValidSubmit">
+                        <div>
+                            <h2>Settings for @auth.User.Identity.Name</h2>
+                            <div class="damselfly-configsetting">
+                                <div class="damselfly-configfield">
+                                    <MudSelect T="string" Label="Theme" HelperText="Select colour theme for the app" @bind-Value="selectedTheme" Variant="UIConstants.MudVariant">
+                                        @foreach (var choice in themeService.Themes)
+                                        {
+                                            <MudSelectItem T="string" Value="@choice.Name">
+                                                @choice.Name.Transform(To.SentenceCase)
+                                            </MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </div>
                             </div>
+                            <div class="damselfly-configsetting">
+                                <div class="damselfly-configfield">
+                                    <MudSelect T="int" Label="Similarity Threshold" @bind-Value="similarityThreshold" Variant="UIConstants.MudVariant"
+                                               HelperText="Select percentage threshold for image similarity searches. 75 usually gives good results.">
+                                        @foreach (var choice in new[] { 100, 90, 75, 50, 25 })
+                                        {
+                                            <MudSelectItem T="int" Value="@choice">
+                                                @choice.ToString()
+                                            </MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" type="submit">Save Settings</button>
                         </div>
-                        <button class="btn btn-primary" type="submit">Save Settings</button>
                     </EditForm>
                 </MudTabPanel>
 
                 <AuthorizeView Policy="@PolicyDefinitions.s_IsAdmin" Context="authPolicy">
                     <MudTabPanel Text="System Settings">
-                        <EditForm Model="@wpSettings" OnValidSubmit="@HandleValidSubmit">
+                        <EditForm Model="@cpuSettings" OnValidSubmit="@HandleValidSubmit">
                             <FluentValidationValidator />
-                            <ValidationSummary />
-
-                            <h2>SideCar Processing</h2>
+                            <ValidationSummary />                            <h2>SideCar Processing</h2>
                             <div class="damselfly-configsetting">
                                 <div class="damselfly-configfield">
                                     <MudCheckBox @bind-Checked="@importSidecarKeywords" Label="Write Sidecar (XMP/ON1) keywords to image files during indexing" />
@@ -72,10 +86,53 @@
                                 </div>
                             </div>
 
+                            <h2>CPU Usage</h2>
                             <div class="damselfly-configsetting">
                                 <div class="damselfly-configfield">
-                                    <MudSelect T="LogEventLevel" Label="Log Level" @bind-Value="logLevel" Variant="Variant.Filled"
-                                               HelperText="Select the logging verbosity">
+                                    <MudSelect T="int" Label="CPU Usage Limit" @bind-Value="cpuSettings.CPULevel" Variant="UIConstants.MudVariant"
+                                                HelperText="Set the maximum CPU level used by AI and thumbnail generation processing">
+                                        @foreach (var choice in CPULevels.OrderBy(x => x.Key))
+                                        {
+                                            <MudSelectItem T="int" Value="@choice.Key">
+                                                @choice.Value
+                                            </MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </div>
+                            </div>
+
+                            <div class="damselfly-configsetting">
+                                <div class="damselfly-configfield">
+                                    <MudCheckBox @bind-Checked="@cpuSettings.EnableAltCPULevel"
+                                                       Label="Adjust CPU usage limits during these times." />
+                                    <div class="damselfly-configsetting">
+                                        <MudTimePicker @bind-Time="cpuSettings.AltTimeStart" Disabled="@(!cpuSettings.EnableAltCPULevel)"
+                                                       Label="Alternate CPU level start time" AutoClose="true" Color="Color.Tertiary"/>
+                                        <MudTimePicker @bind-Time="cpuSettings.AltTimeEnd" Disabled="@(!cpuSettings.EnableAltCPULevel)"
+                                                       Label="Alternate CPU level end time" AutoClose="true" Color="Color.Tertiary"/>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="damselfly-configsetting">
+                                <div class="damselfly-configfield">
+                                    <MudSelect T="int" Label="Alternate CPU Usage Limit" @bind-Value="cpuSettings.CPULevelAlt" Disabled="@(!cpuSettings.EnableAltCPULevel)" Variant="UIConstants.MudVariant"
+                                                HelperText="Set the maximum CPU level used by AI and thumbnail generation processing">
+                                        @foreach (var choice in CPULevels.OrderBy(x => x.Key))
+                                        {
+                                            <MudSelectItem T="int" Value="@choice.Key">
+                                                @choice.Value
+                                            </MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </div>
+                            </div>
+
+                            <h2>Logging</h2>
+                            <div class="damselfly-configsetting">
+                                <div class="damselfly-configfield">
+                                    <MudSelect T="LogEventLevel" Label="Log Level" @bind-Value="logLevel" Variant="UIConstants.MudVariant"
+                                                HelperText="Select the logging verbosity">
                                         @foreach (var choice in userLogLevels)
                                         {
                                             <MudSelectItem T="LogEventLevel" Value="@choice">
@@ -83,24 +140,6 @@
                                             </MudSelectItem>
                                         }
                                     </MudSelect>
-                                </div>
-                            </div>
-
-                            <h2>Wordpress Upload</h2>
-
-                            <div class="damselfly-configsetting">
-                                <div class="damselfly-configfield">
-                                    <MudTextField @bind-Value="@wpSettings.URL" Label="Wordpress URL" ReadOnly="false" Variant="Variant.Filled" />
-                                </div>
-                            </div>
-                            <div class="damselfly-configsetting">
-                                <div class="damselfly-configfield">
-                                    <MudTextField @bind-Value="@wpSettings.UserName" Label="Wordpress User Name" ReadOnly="false" Variant="Variant.Filled" />
-                                </div>
-                            </div>
-                            <div class="damselfly-configsetting">
-                                <div class="damselfly-configfield">
-                                    <MudTextField @bind-Value="@wpSettings.Password" InputType="InputType.Password" Label="Wordpress Password" ReadOnly="false" Variant="Variant.Filled" />
                                 </div>
                             </div>
 
@@ -113,11 +152,24 @@
                             <FluentValidationValidator />
                             <ValidationSummary />
 
-                            <h2>AI Processing</h2>
-                            <MudSwitch T="bool" @bind-Checked="@enableAITimeLimit" Label="Only process image recognition between these times" />
+                            <h2>Image Recognition Settings</h2>
+
                             <div class="damselfly-configsetting">
-                                <MudTimePicker @bind-Time="aiStartTime" Disabled="@(!enableAITimeLimit)" Label="AI processing start time" AutoClose="true" />
-                                <MudTimePicker @bind-Time="aiEndTime" Disabled="@(!enableAITimeLimit)" Label="AI processing end time" AutoClose="true" />
+                                <div class="damselfly-configfield">
+                                    <MudCheckBox @bind-Checked="@enableAIProcessing" Label="Scan images locally for objects/faces using AI (this will use a lot of CPU)" />
+                                </div>
+                            </div>
+
+                            <div class="damselfly-configsetting">
+                                <div class="damselfly-configfield">
+                                    <MudCheckBox @bind-Checked="@disableObjectDetector" Label="Disable object detection scanner" />
+                                </div>
+                            </div>
+
+                            <div class="damselfly-configsetting">
+                                <div class="damselfly-configfield">
+                                    <MudCheckBox @bind-Checked="@writeAITagsToImages" Label="Write recognised item keywords to image EXIF metadata" />
+                                </div>
                             </div>
 
                             <h2>Azure Cognitive Services Face Recognition</h2>
@@ -133,12 +185,12 @@
 
                             <div class="damselfly-configsetting">
                                 <div class="damselfly-configfield">
-                                    <MudTextField @bind-Value="@azureSettings.Endpoint" Label="Azure Endpoint" ReadOnly="false" Variant="Variant.Filled" />
+                                    <MudTextField @bind-Value="@azureSettings.Endpoint" Label="Azure Endpoint" ReadOnly="false" Variant="UIConstants.MudVariant" />
                                 </div>
                             </div>
                             <div class="damselfly-configsetting">
                                 <div class="damselfly-configfield">
-                                    <MudTextField @bind-Value="@azureSettings.ApiKey" Label="Azure API Key" ReadOnly="false" Variant="Variant.Filled" />
+                                    <MudTextField @bind-Value="@azureSettings.ApiKey" Label="Azure API Key" ReadOnly="false" Variant="UIConstants.MudVariant" />
                                 </div>
                             </div>
 
@@ -150,13 +202,13 @@
 
                             <div class="damselfly-configsetting">
                                 <div class="damselfly-configfield">
-                                    <MudSelect T="AzureFaceService.AzureDetection" Label="AI Application" @bind-Value="azureSettings.DetectionType" Variant="Variant.Filled"
+                                    <MudSelect T="AzureFaceService.AzureDetection" Label="AI Application" @bind-Value="azureSettings.DetectionType" Variant="UIConstants.MudVariant"
                                                HelperText="To use the tranaction limit efficiently you can elect to only submit images to Azure which have had faces or people detected in them.">
                                         @foreach (var choice in (AzureFaceService.AzureDetection[])Enum.GetValues(typeof(AzureFaceService.AzureDetection)))
                                         {
-                                        <MudSelectItem T="AzureFaceService.AzureDetection" Value="@choice">
-                                            @choice.ToString().Humanize()
-                                        </MudSelectItem>
+                                            <MudSelectItem T="AzureFaceService.AzureDetection" Value="@choice">
+                                                @choice.ToString().Humanize()
+                                            </MudSelectItem>
                                         }
                                     </MudSelect>
                                 </div>
@@ -182,35 +234,39 @@
                             <h2>Email Settings for Password Reminders, etc.</h2>
 
                             <p>Reminder emails can be sent using SMTP or SendGrid (you can sign up for a free SendGrid account <a href="https://signup.sendgrid.com/" target="_blank">here).</a></p>
-                            <MudSwitch T="bool" @bind-Checked="@useSmtp" Label="@(useSmtp ? "SMTP" : "SendGrid")" />
+                            <MudRadioGroup @bind-SelectedOption="@useSmtp">
+                                <MudRadio Option="@true">SMTP</MudRadio>
+                                <MudRadio Option="@false">SendGrid</MudRadio>
+                            </MudRadioGroup>
+
 
                             @if (useSmtp)
                             {
                                 <div class="damselfly-configsetting">
                                     <div class="damselfly-configfield">
-                                        <MudTextField @bind-Value="@smtpSettings.MailServer" Label="SMTP Server Address" ReadOnly="false" Variant="Variant.Filled" />
+                                        <MudTextField @bind-Value="@smtpSettings.MailServer" Label="SMTP Server Address" ReadOnly="false" Variant="UIConstants.MudVariant" />
                                     </div>
                                 </div>
                                 <div class="damselfly-configsetting">
                                     <div class="damselfly-configfield">
-                                        <MudTextField @bind-Value="@smtpSettings.MailPort" Label="SMTP Port" ReadOnly="false" Variant="Variant.Filled" />
+                                        <MudTextField @bind-Value="@smtpSettings.MailPort" Label="SMTP Port" ReadOnly="false" Variant="UIConstants.MudVariant" />
                                     </div>
                                 </div>
                                 <div class="damselfly-configsetting">
                                     <div class="damselfly-configfield">
-                                        <MudTextField @bind-Value="@smtpSettings.Password" InputType="InputType.Password" Label="SMTP Password" UserAttributes="@MudNoAutofill.noAutoFillAttr" ReadOnly="false" Variant="Variant.Filled" />
-                                    </div>
-                                </div>
-
-                                <div class="damselfly-configsetting">
-                                    <div class="damselfly-configfield">
-                                        <MudTextField @bind-Value="@smtpSettings.Sender" Label="Sender Email" InputType="InputType.Email" UserAttributes="@MudNoAutofill.noAutoFillAttr" ReadOnly="false" Variant="Variant.Filled" />
+                                        <MudTextField @bind-Value="@smtpSettings.Password" InputType="InputType.Password" Label="SMTP Password" UserAttributes="@MudNoAutofill.noAutoFillAttr" ReadOnly="false" Variant="UIConstants.MudVariant" />
                                     </div>
                                 </div>
 
                                 <div class="damselfly-configsetting">
                                     <div class="damselfly-configfield">
-                                        <MudTextField @bind-Value="@smtpSettings.SenderName" Label="Sender Name" ReadOnly="false" UserAttributes="@MudNoAutofill.noAutoFillAttr" Variant="Variant.Filled" />
+                                        <MudTextField @bind-Value="@smtpSettings.Sender" Label="Sender Email" InputType="InputType.Email" UserAttributes="@MudNoAutofill.noAutoFillAttr" ReadOnly="false" Variant="UIConstants.MudVariant" />
+                                    </div>
+                                </div>
+
+                                <div class="damselfly-configsetting">
+                                    <div class="damselfly-configfield">
+                                        <MudTextField @bind-Value="@smtpSettings.SenderName" Label="Sender Name" ReadOnly="false" UserAttributes="@MudNoAutofill.noAutoFillAttr" Variant="UIConstants.MudVariant" />
                                     </div>
                                 </div>
                             }
@@ -218,16 +274,39 @@
                             {
                                 <div class="damselfly-configsetting">
                                     <div class="damselfly-configfield">
-                                        <MudTextField @bind-Value="@sendGridSettings.SendGridKey" Label="SendGrid API Key" ReadOnly="false" Variant="Variant.Filled" />
+                                        <MudTextField @bind-Value="@sendGridSettings.SendGridKey" Label="SendGrid API Key" ReadOnly="false" Variant="UIConstants.MudVariant" />
                                     </div>
                                 </div>
                                 <div class="damselfly-configsetting">
                                     <div class="damselfly-configfield">
                                         <MudTextField @bind-Value="@sendGridSettings.SendGridFromAddress" Label="SendGrid From Address" UserAttributes="@MudNoAutofill.noAutoFillAttr" InputType="InputType.Email" ReadOnly="false"
-                                                      Variant="Variant.Filled" HelperText="This should match the email address associated with your API key in your SendGrid account" />
+                                                      Variant="UIConstants.MudVariant" HelperText="This should match the email address associated with your API key in your SendGrid account" />
                                     </div>
                                 </div>
                             }
+                            <button class="btn btn-primary" type="submit">Save Settings</button>
+                        </EditForm>
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="Wordpress">
+                        <EditForm Model="@wpSettings" OnValidSubmit="@HandleValidSubmit">
+                            <FluentValidationValidator />
+                            <ValidationSummary />
+                            <div class="damselfly-configsetting">
+                                <div class="damselfly-configfield">
+                                    <MudTextField @bind-Value="@wpSettings.URL" Label="Wordpress URL" ReadOnly="false" Variant="UIConstants.MudVariant" />
+                                </div>
+                            </div>
+                            <div class="damselfly-configsetting">
+                                <div class="damselfly-configfield">
+                                    <MudTextField @bind-Value="@wpSettings.UserName" Label="Wordpress User Name" ReadOnly="false" Variant="UIConstants.MudVariant" />
+                                </div>
+                            </div>
+                            <div class="damselfly-configsetting">
+                                <div class="damselfly-configfield">
+                                    <MudTextField @bind-Value="@wpSettings.Password" InputType="InputType.Password" Label="Wordpress Password" ReadOnly="false" Variant="UIConstants.MudVariant" />
+                                </div>
+                            </div>
                             <button class="btn btn-primary" type="submit">Save Settings</button>
                         </EditForm>
                     </MudTabPanel>
@@ -243,6 +322,7 @@
 @code {
     private WordpressSettings wpSettings = new WordpressSettings();
     private AzureSettings azureSettings = new AzureSettings();
+    private CPULevelSettings cpuSettings = new CPULevelSettings();
     private EmailSmtpService.SmtpSettings smtpSettings = new EmailSmtpService.SmtpSettings();
     private EmailSendGridService.SendGridSettings sendGridSettings = new EmailSendGridService.SendGridSettings();
     private LogEventLevel logLevel;
@@ -251,11 +331,33 @@
     private string selectedTheme;
     private bool useSmtp = true;
     private bool forceLogin = false;
+    private bool enableAIProcessing = true;
+    private bool disableObjectDetector = false;
+    private bool writeAITagsToImages = false;
     private bool allowExternalRegistration = false;
     private bool anableAuthAndRoles = false;
-    TimeSpan? aiStartTime = new TimeSpan(23, 00, 00);
-    TimeSpan? aiEndTime = new TimeSpan(04, 30, 00);
-    private bool enableAITimeLimit = false;
+    private int similarityThreshold = 75;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            if (anableAuthAndRoles && !userService.GetUsers().GetAwaiter().GetResult().Any())
+            {
+                var dialog = DialogService.Show<UserDialog>("Create Admin User");
+                var result = await dialog.Result;
+            }
+        }
+    }
+
+    private Dictionary<int, string> CPULevels = new Dictionary<int, string>
+    {
+        { 0, "0% (Disabled)" },
+        { 25, "25%" },
+        { 50, "50%" },
+        { 75, "75%" },
+        { 100, "100% (unlimited)" },
+    };
 
     private void HandleValidSubmit()
     {
@@ -275,6 +377,10 @@
             configService.Set(ConfigSettings.AzureUseFreeTier, azureSettings.UsingFreeTier.ToString());
             configService.Set(ConfigSettings.AzureDetectionType, azureSettings.DetectionType.ToString());
 
+            configService.Set(ConfigSettings.WriteAITagsToImages, writeAITagsToImages.ToString());
+            configService.Set(ConfigSettings.EnableAIProcessing, enableAIProcessing.ToString());
+            configService.Set(ConfigSettings.DisableObjectDetector, disableObjectDetector.ToString());
+
             configService.Set(ConfigSettings.UseSmtp, useSmtp.ToString());
 
             configService.Set(ConfigSettings.EnablePoliciesAndRoles, anableAuthAndRoles.ToString());
@@ -287,26 +393,23 @@
             smtpSettings.Save(configService);
             sendGridSettings.Save(configService);
 
-            string aiTimeRangeSettings = null;
-
-            if (enableAITimeLimit)
-                aiTimeRangeSettings = $"{aiStartTime.LocalTimeSpanToUTC()}-{aiEndTime.LocalTimeSpanToUTC()}";
-
-            configService.Set(ConfigSettings.AIProcessingTimeRange, aiTimeRangeSettings);
+            cpuSettings.Save(configService);
 
             Logging.ChangeLogLevel(logLevel);
 
             // Do this last as it has a material effect.
-            if (themeService.CurrentTheme != selectedTheme)
+            if (userThemeService.CurrentThemeName != selectedTheme)
             {
-                themeService.CurrentTheme = selectedTheme;
+                userThemeService.CurrentThemeName = selectedTheme;
             }
+
+            userConfigService.Set(ConfigSettings.SimilarityThreshold, similarityThreshold.ToString());
 
             UpdateServicesWithNewSettings();
         }
         catch (Exception ex)
         {
-            statusService.StatusText = "Error saving settings.";
+            statusService.StatusText = $"Error saving settings: {ex.Message}";
             Logging.LogError($"Error saving settings: {ex}");
         }
     }
@@ -315,6 +418,8 @@
     {
         try
         {
+            workService.SetCPUSchedule( cpuSettings );
+
             // Init the azure service status based on config.
             _ = azureService.StartService();
 
@@ -322,7 +427,7 @@
             wpService.ResetClient();
 
         }
-        catch( Exception ex )
+        catch (Exception ex)
         {
             Logging.LogError($"Exception initialising services after settings update: {ex}");
         }
@@ -330,6 +435,8 @@
 
     protected override void OnInitialized()
     {
+        similarityThreshold = userConfigService.GetInt(ConfigSettings.SimilarityThreshold, 75);
+
         wpSettings.URL = configService.Get(ConfigSettings.WordpressURL);
         wpSettings.UserName = configService.Get(ConfigSettings.WordpressUser);
         wpSettings.Password = configService.Get(ConfigSettings.WordpressPassword);
@@ -344,21 +451,17 @@
         allowExternalRegistration = configService.GetBool(ConfigSettings.AllowExternalRegistration);
         useSmtp = configService.GetBool(ConfigSettings.UseSmtp);
         logLevel = configService.Get<LogEventLevel>(ConfigSettings.LogLevel);
+        writeAITagsToImages = configService.GetBool(ConfigSettings.WriteAITagsToImages);
+        enableAIProcessing = configService.GetBool(ConfigSettings.EnableAIProcessing, true);
+        disableObjectDetector = configService.GetBool(ConfigSettings.DisableObjectDetector, false);
 
         smtpSettings.Load(configService);
         sendGridSettings.Load(configService);
 
         importSidecarKeywords = configService.GetBool(ConfigSettings.ImportSidecarKeywords);
-        selectedTheme = themeService.CurrentTheme;
+        selectedTheme = userThemeService.CurrentThemeName;
 
-        var range = imageService.GetProcessingTimeRange();
-
-        if( range.start != null && range.end != null )
-        {
-            aiStartTime = range.start.UTCTimeSpanToLocal();
-            aiEndTime = range.end.UTCTimeSpanToLocal();
-            enableAITimeLimit = true;
-        }
+        cpuSettings.Load(configService);
 
         base.OnInitialized();
     }
